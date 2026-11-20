@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Android signing secrets: never commit these
+*.keystore
+*.jks
+android/local.properties
