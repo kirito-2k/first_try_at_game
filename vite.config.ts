@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 
-// base must match the repo name so the game works at
-// https://<username>.github.io/first_try_at_game/
+// './' makes the built game work from any address (GitHub Pages, Netlify,
+// Cloudflare Pages, a custom domain, or inside the Android app later).
 export default defineConfig({
-  base: '/first_try_at_game/',
+  base: './',
   server: { host: true },
   build: { chunkSizeWarningLimit: 2000 }, // Phaser itself is ~1.2 MB
 });

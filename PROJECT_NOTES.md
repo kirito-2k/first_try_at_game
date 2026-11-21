@@ -72,9 +72,25 @@ Estimate: 3-4 months.
 - Joystick is nearly invisible: change JOY_BASE_ALPHA / JOY_LINE_ALPHA / JOY_KNOB_ALPHA.
 - Generated art is a stand-in: swap for a licensed pack (Kenney etc.) near release.
 
+### M2.2: Friendly basics (built, awaiting playtest)
+- Title screen (`MenuScene`): TAP TO START, best wave shown. With a saved run: Continue (Wave N) and New run.
+- Pause button (top centre) and Esc/P on keyboard. Pause menu: Resume, Restart, Menu.
+  Game also auto-pauses when the tab/app is hidden. 0.6 s safe time after resuming.
+- All game timing uses a pausable clock (`clock` in GameScene), so pause freezes everything.
+- Save (`src/save.ts`, browser localStorage): saved every time a wave is cleared (next wave, kills, HP,
+  upgrades list for later). Erased on death or when starting a new run. Quit to Menu keeps the save.
+- `vite.config.ts` base is now './' so the build works on any host (needed for the hidden-link step).
+- Shared helpers: `src/ui.ts` (text style, buttons), `src/save.ts`.
+
+## Decisions pending
+- **Hidden link**: user does not want the GitHub name/repo in the game's address. Options: free host
+  (Netlify / Cloudflare Pages) with a neutral name, repo can then go private again; or a paid custom domain.
+- **Upgrades** (M3): to be discussed with the user before building.
+
 ## Next
-1. User playtests M2.1 on the phone: is it too easy/hard, does auto-fire feel right, is it fun?
-2. M3: upgrade choice after each wave (3 random cards, pick 1), upgrades as a data list.
+1. User playtests M2.2 (menu, pause, continue) and M2.1 visuals on the phone.
+2. Hidden link: decide host, then set it up (walk the user through it).
+3. M3: upgrade choice after each wave (3 random cards, pick 1), upgrades as a data list.
 3. M4: more enemy types (wisp, brute). M5: spitter + boss. M6: meta-progression and saves.
 
 ## Known bugs / open questions

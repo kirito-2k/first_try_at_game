@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { createTextures, W, H } from '../art';
+import { clearRun, loadBest, loadRun, recordBest, saveRun } from '../save';
+import { makeButton, textStyle } from '../ui';
 
 // ---- Tuning numbers (change these to adjust the feel) ----
 // The game is 720x1280, so distances are double the old 360x640 values.
@@ -7,6 +9,7 @@ const PLAYER_SPEED = 420; // pixels per second
 const PLAYER_MAX_HP = 5;
 const PLAYER_MARGIN = 56; // how close to the screen edge the mage can walk
 const HIT_INVULN_MS = 900; // safe time after being hit
+const RESUME_GRACE_MS = 600; // safe time right after un-pausing
 
 const JOY_RADIUS = 90; // how far the knob can move
 const JOY_BASE_ALPHA = 0.07; // joystick ring fill: 0 = invisible, 1 = solid
@@ -25,8 +28,8 @@ const GHOST_HIT_RADIUS = 30; // bolt vs ghost
 const CONTACT_RADIUS = 40; // ghost touching the mage
 const WAVE_BREAK_MS = 1500;
 
-const BEST_KEY = 'hauntedwood.bestWave';
-const FONT = 'Trebuchet MS, Verdana, sans-serif';
+const PAUSE_BTN = { x: W / 2, y: 52, hit: 56 }; // pause button position and tap radius
+const MENU_BTN = { x: W / 2, y: H / 2 + 250, w: 300, h: 80 }; // "Menu" button on the death panel
 
 interface Ghost extends Phaser.GameObjects.Image {
   hp: number;
@@ -39,22 +42,14 @@ interface Bolt extends Phaser.GameObjects.Image {
   bornAt: number;
 }
 
-function textStyle(size: number, color: string): Phaser.Types.GameObjects.Text.TextStyle {
-  return {
-    fontFamily: FONT,
-    fontSize: `${size}px`,
-    fontStyle: 'bold',
-    color,
-    stroke: '#05070f',
-    strokeThickness: Math.max(3, Math.round(size / 7)),
-  };
-}
-
 /**
- * M2.1: the same mage-vs-ghost waves as M2, with generated art (see art.ts),
- * shadows, particles, a heart HUD, animated banners and a nicer death panel.
+ * Mage-vs-ghost waves. Starts with { resume: true } to continue the saved run,
+ * otherwise a fresh run. A run is saved every time a wave is cleared and erased on death.
+ * All game timing uses `this.clock`, which stops while paused.
  */
 export class GameScene extends Phaser.Scene {
+  private resumeRun = false;
+
   private player!: Phaser.GameObjects.Image;
   private playerShadow!: Phaser.GameObjects.Image;
   private aura!: Phaser.GameObjects.Image;
@@ -72,6 +67,10 @@ export class GameScene extends Phaser.Scene {
   private trail!: Phaser.GameObjects.Particles.ParticleEmitter;
   private burst!: Phaser.GameObjects.Particles.ParticleEmitter;
 
+  private clock = 0; // game time in ms, only advances while playing
+  private paused = false;
+  private pauseItems: Phaser.GameObjects.GameObject[] = [];
+
   private hp = PLAYER_MAX_HP;
   private wave = 0;
   private kills = 0;
@@ -85,9 +84,16 @@ export class GameScene extends Phaser.Scene {
   private waveText!: Phaser.GameObjects.Text;
   private killText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
+  private savedText!: Phaser.GameObjects.Text;
 
   constructor() {
     super('GameScene');
+  }
+
+  init(data: { resume?: boolean }): void {
+    this.resumeRun = !!data?.resume;
+    // A fresh run replaces any old save.
+    if (!this.resumeRun) clearRun();
   }
 
   create(): void {
@@ -97,6 +103,9 @@ export class GameScene extends Phaser.Scene {
     this.ghosts = [];
     this.bolts = [];
     this.hearts = [];
+    this.pauseItems = [];
+    this.clock = 0;
+    this.paused = false;
     this.hp = PLAYER_MAX_HP;
     this.wave = 0;
     this.kills = 0;
@@ -106,6 +115,16 @@ export class GameScene extends Phaser.Scene {
     this.dead = false;
     this.joyPointerId = null;
     this.joyVec.set(0, 0);
+
+    // Continue a saved run: startNextWave() adds 1, so begin one wave earlier.
+    if (this.resumeRun) {
+      const save = loadRun();
+      if (save) {
+        this.wave = save.wave - 1;
+        this.kills = save.kills;
+        this.hp = Phaser.Math.Clamp(save.hp, 1, PLAYER_MAX_HP);
+      }
+    }
 
     // World.
     this.add.image(W / 2, H / 2, 'bg').setDepth(0);
@@ -173,12 +192,23 @@ export class GameScene extends Phaser.Scene {
     const keyboard = this.input.keyboard!;
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as Record<string, Phaser.Input.Keyboard.Key>;
+    // Clear first so a restart never leaves two listeners (they would cancel each other out).
+    keyboard.removeAllListeners('keydown-ESC');
+    keyboard.removeAllListeners('keydown-P');
+    keyboard.on('keydown-ESC', () => this.togglePause());
+    keyboard.on('keydown-P', () => this.togglePause());
 
     this.input.removeAllListeners();
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) =>
+      this.onPointerDown(p, over),
+    );
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onPointerMove(p));
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
     this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
+
+    // Pause by itself when the player switches app or tab.
+    this.game.events.on(Phaser.Core.Events.HIDDEN, this.pauseGame, this);
+    this.events.once('shutdown', () => this.game.events.off(Phaser.Core.Events.HIDDEN, this.pauseGame, this));
 
     this.cameras.main.fadeIn(350);
     this.startNextWave();
@@ -202,16 +232,41 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(25)
       .setAlpha(0);
+    this.savedText = this.add
+      .text(W / 2, H * 0.27 + 70, 'Progress saved', textStyle(28, '#9fb0e8'))
+      .setOrigin(0.5)
+      .setDepth(25)
+      .setAlpha(0);
+
+    // Pause button (top centre): a faint disc with two bars.
+    this.add
+      .circle(PAUSE_BTN.x, PAUSE_BTN.y, 30, 0x000000, 0.35)
+      .setStrokeStyle(3, 0xffffff, 0.35)
+      .setDepth(25);
+    this.add.rectangle(PAUSE_BTN.x - 9, PAUSE_BTN.y, 8, 26, 0xffffff, 0.8).setDepth(26);
+    this.add.rectangle(PAUSE_BTN.x + 9, PAUSE_BTN.y, 8, 26, 0xffffff, 0.8).setDepth(26);
   }
 
   // ---------- Input ----------
 
-  private onPointerDown(p: Phaser.Input.Pointer): void {
+  private onPointerDown(p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]): void {
+    if (over && over.length > 0) return; // a menu button handles this tap itself
+    if (this.paused) return;
+
     if (this.dead) {
-      // Small delay so the tap that killed you does not instantly restart.
-      if (this.time.now - this.deadAt > 700) this.scene.restart();
+      if (this.clock - this.deadAt < 700) return; // the tap that killed you must not restart
+      const onMenuBtn =
+        Math.abs(p.x - MENU_BTN.x) < MENU_BTN.w / 2 && Math.abs(p.y - MENU_BTN.y) < MENU_BTN.h / 2;
+      if (onMenuBtn) this.scene.start('MenuScene');
+      else this.scene.restart({ resume: false });
       return;
     }
+
+    if (Phaser.Math.Distance.Between(p.x, p.y, PAUSE_BTN.x, PAUSE_BTN.y) < PAUSE_BTN.hit) {
+      this.pauseGame();
+      return;
+    }
+
     if (this.joyPointerId !== null) return;
     this.joyPointerId = p.id;
     this.joyOrigin.set(p.x, p.y);
@@ -235,18 +290,81 @@ export class GameScene extends Phaser.Scene {
 
   private onPointerUp(p: Phaser.Input.Pointer): void {
     if (p.id !== this.joyPointerId) return;
+    this.releaseJoystick();
+  }
+
+  private releaseJoystick(): void {
     this.joyPointerId = null;
     this.joyVec.set(0, 0);
     this.joyBase.setVisible(false);
     this.joyKnob.setVisible(false);
   }
 
+  // ---------- Pause ----------
+
+  private togglePause(): void {
+    if (this.paused) this.resumeGame();
+    else this.pauseGame();
+  }
+
+  private pauseGame(): void {
+    if (this.paused || this.dead) return;
+    this.paused = true;
+    this.releaseJoystick();
+
+    // Freeze delayed calls, tweens and particles together with the game clock.
+    this.time.paused = true;
+    this.tweens.pauseAll();
+    this.trail.pause();
+    this.burst.pause();
+
+    const cx = W / 2;
+    const cy = H / 2;
+    const shade = this.add.rectangle(cx, cy, W, H, 0x000000, 0.7).setDepth(59).setInteractive(); // blocks taps behind it
+    const panel = this.add.graphics().setDepth(59);
+    panel.fillStyle(0x0d1226, 0.96).fillRoundedRect(cx - 270, cy - 290, 540, 580, 30);
+    panel.lineStyle(4, 0x4a5aa8, 1).strokeRoundedRect(cx - 270, cy - 290, 540, 580, 30);
+    const title = this.add.text(cx, cy - 210, 'PAUSED', textStyle(68, '#ffffff')).setOrigin(0.5).setDepth(60);
+
+    this.pauseItems = [
+      shade,
+      panel,
+      title,
+      ...makeButton(this, cx, cy - 80, 420, 96, 'Resume', () => this.resumeGame(), true),
+      ...makeButton(this, cx, cy + 50, 420, 84, 'Restart', () => this.leave(() => this.scene.restart({ resume: false }))),
+      ...makeButton(this, cx, cy + 170, 420, 84, 'Menu', () => this.leave(() => this.scene.start('MenuScene'))),
+    ];
+  }
+
+  private resumeGame(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.pauseItems.forEach((o) => o.destroy());
+    this.pauseItems = [];
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    this.trail.resume();
+    this.burst.resume();
+    this.invulnUntil = Math.max(this.invulnUntil, this.clock + RESUME_GRACE_MS);
+  }
+
+  /** Un-freeze everything, then change scene (so nothing stays stuck paused). */
+  private leave(action: () => void): void {
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    action();
+  }
+
   // ---------- Main loop ----------
 
-  update(time: number, delta: number): void {
+  update(_time: number, delta: number): void {
+    if (this.paused) return;
+    this.clock += delta;
+    const time = this.clock;
+
     if (this.dead) {
       if (time - this.deadAt > 700 && Phaser.Input.Keyboard.JustDown(this.cursors.space)) {
-        this.scene.restart();
+        this.scene.restart({ resume: false });
       }
       return;
     }
@@ -262,10 +380,12 @@ export class GameScene extends Phaser.Scene {
     // Blink while invulnerable.
     this.player.setAlpha(time < this.invulnUntil ? (Math.floor(time / 80) % 2 ? 0.4 : 1) : 1);
 
-    // Wave cleared -> short break -> next wave.
+    // Wave cleared -> save -> short break -> next wave.
     if (this.ghosts.length === 0 && this.waveBreakUntil === 0) {
       this.waveBreakUntil = time + WAVE_BREAK_MS;
+      saveRun({ v: 1, wave: this.wave + 1, kills: this.kills, hp: this.hp, upgrades: [] });
       this.showBanner(`Wave ${this.wave} cleared!`, '#9dffb0');
+      this.showSaved();
     }
     if (this.waveBreakUntil !== 0 && time >= this.waveBreakUntil) {
       this.waveBreakUntil = 0;
@@ -455,46 +575,50 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: this.bannerText, alpha: 0, delay: 900, duration: 500 });
   }
 
+  private showSaved(): void {
+    this.tweens.killTweensOf(this.savedText);
+    this.savedText.setAlpha(0);
+    this.tweens.add({ targets: this.savedText, alpha: 1, duration: 250, delay: 300 });
+    this.tweens.add({ targets: this.savedText, alpha: 0, delay: 1100, duration: 400 });
+  }
+
   private die(time: number): void {
     this.dead = true;
     this.deadAt = time;
-    this.joyVec.set(0, 0);
-    this.joyBase.setVisible(false);
-    this.joyKnob.setVisible(false);
+    this.releaseJoystick();
 
-    let best = 0;
-    try {
-      best = Number(localStorage.getItem(BEST_KEY)) || 0;
-      if (this.wave > best) {
-        best = this.wave;
-        localStorage.setItem(BEST_KEY, String(best));
-      }
-    } catch {
-      // Storage can be blocked (private mode). The game still works without it.
-      best = Math.max(best, this.wave);
-    }
-    const newBest = this.wave >= best && this.wave > 1;
+    clearRun(); // a roguelike run ends on death
+    const previousBest = loadBest();
+    const best = recordBest(this.wave);
+    const newBest = this.wave > previousBest && this.wave > 1;
 
     const shade = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.7);
     const panel = this.add.graphics();
-    panel.fillStyle(0x0d1226, 0.95).fillRoundedRect(W / 2 - 270, H / 2 - 260, 540, 520, 30);
-    panel.lineStyle(4, 0x4a5aa8, 1).strokeRoundedRect(W / 2 - 270, H / 2 - 260, 540, 520, 30);
+    panel.fillStyle(0x0d1226, 0.95).fillRoundedRect(W / 2 - 270, H / 2 - 290, 540, 620, 30);
+    panel.lineStyle(4, 0x4a5aa8, 1).strokeRoundedRect(W / 2 - 270, H / 2 - 290, 540, 620, 30);
 
-    const title = this.add.text(W / 2, H / 2 - 180, 'YOU DIED', textStyle(72, '#ff6b6b')).setOrigin(0.5);
+    const title = this.add.text(W / 2, H / 2 - 210, 'YOU DIED', textStyle(72, '#ff6b6b')).setOrigin(0.5);
     const stats = this.add
       .text(
         W / 2,
-        H / 2 - 30,
+        H / 2 - 60,
         `Wave reached   ${this.wave}\nGhosts banished   ${this.kills}\nBest wave   ${best}`,
         { ...textStyle(34, '#ffffff'), align: 'center', lineSpacing: 14 },
       )
       .setOrigin(0.5);
     const items: Phaser.GameObjects.GameObject[] = [shade, panel, title, stats];
     if (newBest) {
-      items.push(this.add.text(W / 2, H / 2 + 100, 'NEW BEST!', textStyle(36, '#ffd66b')).setOrigin(0.5));
+      items.push(this.add.text(W / 2, H / 2 + 60, 'NEW BEST!', textStyle(36, '#ffd66b')).setOrigin(0.5));
     }
-    const again = this.add.text(W / 2, H / 2 + 190, 'Tap to play again', textStyle(36, '#8ab4ff')).setOrigin(0.5);
+    const again = this.add.text(W / 2, H / 2 + 150, 'Tap to play again', textStyle(36, '#8ab4ff')).setOrigin(0.5);
     items.push(again);
+
+    // Visual only: taps on it are detected in onPointerDown (distance check).
+    const menuBg = this.add
+      .rectangle(MENU_BTN.x, MENU_BTN.y, MENU_BTN.w, MENU_BTN.h, 0x1a2144, 0.96)
+      .setStrokeStyle(3, 0x4a5aa8);
+    const menuText = this.add.text(MENU_BTN.x, MENU_BTN.y, 'Menu', textStyle(34, '#ffffff')).setOrigin(0.5);
+    items.push(menuBg, menuText);
 
     const overlay = this.add.container(0, 0, items).setDepth(50).setAlpha(0);
     this.tweens.add({ targets: overlay, alpha: 1, duration: 350 });
