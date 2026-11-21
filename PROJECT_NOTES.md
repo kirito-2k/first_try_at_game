@@ -82,15 +82,20 @@ Estimate: 3-4 months.
 - `vite.config.ts` base is now './' so the build works on any host (needed for the hidden-link step).
 - Shared helpers: `src/ui.ts` (text style, buttons), `src/save.ts`.
 
+## Decisions made
+- 2026-11-21, upgrades (full design in `UPGRADES.md`): run-only, mix of simple and flashy, 8 upgrades,
+  heal 1 heart per cleared wave, pick 1 of 3 cards. Ghost HP grows slowly with the wave number.
+- Playtest so far (user): menu, pause, continue and visuals "good so far". No bugs reported.
+
 ## Decisions pending
 - **Hidden link**: user does not want the GitHub name/repo in the game's address. Options: free host
   (Netlify / Cloudflare Pages) with a neutral name, repo can then go private again; or a paid custom domain.
-- **Upgrades** (M3): to be discussed with the user before building.
+- (Upgrades are decided: see `UPGRADES.md`. Not built yet.)
 
 ## Next
-1. User playtests M2.2 (menu, pause, continue) and M2.1 visuals on the phone.
-2. Hidden link: decide host, then set it up (walk the user through it).
-3. M3: upgrade choice after each wave (3 random cards, pick 1), upgrades as a data list.
+1. Hidden link: being discussed in a SEPARATE chat (Netlify vs Cloudflare Pages). Plan: set up host while
+   repo is public, check the link, make repo private, then remove the GitHub Pages workflow.
+2. M3: build upgrades exactly as in `UPGRADES.md` (cards after each wave, heal 1, ghost HP scaling, save upgrades).
 3. M4: more enemy types (wisp, brute). M5: spitter + boss. M6: meta-progression and saves.
 
 ## Known bugs / open questions

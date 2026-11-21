@@ -23,23 +23,25 @@ Phaser 3 + TypeScript + Vite. Deploys to GitHub Pages via `.github/workflows/dep
 Later: Capacitor (Android), AdMob. Repo: `kirito-2k/first_try_at_game`, branch `main`.
 
 ## State (update this block)
-- Last updated: 2026-11-21
+- Last updated: 2026-11-21 (late)
 - Game idea: Haunted Wood (lone mage, ghost waves, pick 1 upgrade per wave). See CONCEPT.md
 - Live URL: https://kirito-2k.github.io/first_try_at_game/ (repo is public, Pages on)
 - Milestone: M2.2 pushed (title screen, pause menu, save/continue per cleared wave)
-- Waiting on: playtest of M2.2; user's choice for the hidden link host; upgrades discussion (M3)
+- Playtest M2.2: good so far. Upgrades design APPROVED (see UPGRADES.md), not built yet.
+- Waiting on: user says "go" for M3; hidden-link host choice is handled in a separate chat
 - Known bugs: none reported yet
 
 ## Next step
-After playtest feedback, build M3: upgrade choice after each wave (3 random cards, pick 1),
-upgrades kept as a data list so new ones are one-line additions.
+Build M3 exactly as specified in `UPGRADES.md` (read that file first): 3 cards after each cleared wave,
+heal 1 heart, 8 upgrades as a data list in `src/upgrades.ts`, ghost HP scaling, upgrades saved in RunSave.
+Do not re-ask the design questions; they are decided.
 
 ## File map
 - `index.html`, `src/main.ts`: page and game setup
 - `src/scenes/GameScene.ts`: the whole game so far (tuning constants at the top)
 - `src/art.ts`: generates every texture in code (game size 720x1280)
 - `src/scenes/MenuScene.ts`: title screen. `src/save.ts`: localStorage saves. `src/ui.ts`: buttons/text style
-- `CONCEPT.md`: game design one-pager
+- `CONCEPT.md`: game design one-pager. `UPGRADES.md`: approved upgrade design (M3)
 - `.github/workflows/deploy.yml`: auto-publish to GitHub Pages
 - `PROJECT_NOTES.md`: full notes. `agents/AGENT_TEMPLATE.md`: base for future agents.
 
