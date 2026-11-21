@@ -14,7 +14,9 @@ Small roguelike mobile game, published on Google Play, aiming for passive income
   no scheduled tasks. Claude can push to this repo when GitHub access is granted in the session.
 
 ## Concept
-**Not chosen yet.** Needs 1-2 hook ideas from the user (a sentence or two each).
+**Haunted Wood** (working title): a lone mage in a haunted forest, ghosts swarm in waves,
+the mage auto-casts, the player only moves, and picks one upgrade after each wave.
+Full details in `CONCEPT.md`.
 Scope target: one character, 3-5 enemies, one theme, ~10 minute runs.
 
 ## Tech decisions
@@ -47,20 +49,26 @@ Estimate: 3-4 months.
 
 ## Milestone log
 
-### M1: Playable skeleton (done, awaiting first playtest)
-- Vite + Phaser 3 + TypeScript project.
-- Green square moves with a touch joystick (appears where the finger lands) or arrows / WASD.
-- GitHub Actions workflow deploys to GitHub Pages on every push to `main`.
-- Not yet run by Claude (no network in its workspace): the first real build happens on GitHub.
+### M1: Playable skeleton (done, playtested)
+- Vite + Phaser 3 + TypeScript project, touch joystick, GitHub Pages deploy.
+- Playtest result (user, phone): works, movement "a bit slow" -> speed raised 160 -> 210 in M2.
+- Repo had to be made public (free GitHub plan only allows Pages on public repos).
+
+### M2: Mage vs ghosts (built, awaiting playtest)
+- Blue square mage auto-fires a bolt at the nearest ghost in range.
+- Ghost squares chase the mage. Wave 1 = 5 ghosts, +2 per wave.
+- 5 HP, short invulnerability after a hit, screen shake, hearts in the HUD.
+- Wave cleared banner, short break, next wave.
+- Death screen (wave, kills, best wave saved in localStorage), tap or Space to restart.
+- All tuning numbers are constants at the top of `src/scenes/GameScene.ts`.
 
 ## Next
-1. User enables Pages (Settings > Pages > Source: GitHub Actions) and opens the link on the phone.
-2. User reports whether the square moves smoothly with the touch joystick.
-3. User shares 1-2 game ideas; Claude picks one and writes the concept section above.
-4. M2: enemy, attack, death and restart for the chosen idea.
+1. User playtests M2 on the phone: is it too easy/hard, does auto-fire feel right, is it fun?
+2. M3: upgrade choice after each wave (3 random cards, pick 1), upgrades as a data list.
+3. M4: more enemy types (wisp, brute). M5: spitter + boss. M6: meta-progression and saves.
 
 ## Known bugs / open questions
-- None yet (first build not tested).
+- None reported yet for M2.
 
 ## Working rules
 - Small milestones, each ending in something playable.

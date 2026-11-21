@@ -23,19 +23,21 @@ Phaser 3 + TypeScript + Vite. Deploys to GitHub Pages via `.github/workflows/dep
 Later: Capacitor (Android), AdMob. Repo: `kirito-2k/first_try_at_game`, branch `main`.
 
 ## State (update this block)
-- Last updated: 2026-11-20
-- Game idea: NOT chosen yet
-- Milestone: M1 skeleton pushed (moving square + touch joystick + Pages deploy)
-- Waiting on: user enables Pages, playtests on phone, shares 1-2 game ideas
+- Last updated: 2026-11-21
+- Game idea: Haunted Wood (lone mage, ghost waves, pick 1 upgrade per wave). See CONCEPT.md
+- Live URL: https://kirito-2k.github.io/first_try_at_game/ (repo is public, Pages on)
+- Milestone: M2 pushed (mage auto-fire, ghosts, HP, waves, death/restart)
+- Waiting on: user playtests M2 on phone and reports feel/bugs
 - Known bugs: none reported yet
 
 ## Next step
-Get the game idea, write the concept into `PROJECT_NOTES.md`, then build M2
-(enemy, attack, death, restart).
+After playtest feedback, build M3: upgrade choice after each wave (3 random cards, pick 1),
+upgrades kept as a data list so new ones are one-line additions.
 
 ## File map
 - `index.html`, `src/main.ts`: page and game setup
-- `src/scenes/GameScene.ts`: current scene (square + joystick)
+- `src/scenes/GameScene.ts`: the whole game so far (tuning constants at the top)
+- `CONCEPT.md`: game design one-pager
 - `.github/workflows/deploy.yml`: auto-publish to GitHub Pages
 - `PROJECT_NOTES.md`: full notes. `agents/AGENT_TEMPLATE.md`: base for future agents.
 
