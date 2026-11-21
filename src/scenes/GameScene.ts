@@ -1,41 +1,63 @@
 import Phaser from 'phaser';
+import { createTextures, W, H } from '../art';
 
 // ---- Tuning numbers (change these to adjust the feel) ----
-const PLAYER_SIZE = 24;
-const PLAYER_SPEED = 210; // pixels per second
+// The game is 720x1280, so distances are double the old 360x640 values.
+const PLAYER_SPEED = 420; // pixels per second
 const PLAYER_MAX_HP = 5;
+const PLAYER_MARGIN = 56; // how close to the screen edge the mage can walk
 const HIT_INVULN_MS = 900; // safe time after being hit
-const JOY_RADIUS = 50;
+
+const JOY_RADIUS = 90; // how far the knob can move
+const JOY_BASE_ALPHA = 0.07; // joystick ring fill: 0 = invisible, 1 = solid
+const JOY_LINE_ALPHA = 0.18; // joystick ring outline
+const JOY_KNOB_ALPHA = 0.16; // joystick knob
 
 const FIRE_INTERVAL_MS = 650; // time between bolts
-const BOLT_SPEED = 380;
+const BOLT_SPEED = 760;
 const BOLT_DAMAGE = 1;
-const BOLT_RANGE = 260; // mage only fires at ghosts closer than this
+const BOLT_RANGE = 520; // mage only fires at ghosts closer than this
 const BOLT_LIFE_MS = 1200;
 
-const GHOST_SIZE = 22;
 const GHOST_HP = 2;
-const GHOST_SPEED = 55;
+const GHOST_SPEED = 110;
+const GHOST_HIT_RADIUS = 30; // bolt vs ghost
+const CONTACT_RADIUS = 40; // ghost touching the mage
 const WAVE_BREAK_MS = 1500;
 
 const BEST_KEY = 'hauntedwood.bestWave';
+const FONT = 'Trebuchet MS, Verdana, sans-serif';
 
-interface Ghost extends Phaser.GameObjects.Rectangle {
+interface Ghost extends Phaser.GameObjects.Image {
   hp: number;
+  shadow: Phaser.GameObjects.Image;
+  phase: number;
 }
-interface Bolt extends Phaser.GameObjects.Arc {
+interface Bolt extends Phaser.GameObjects.Image {
   vx: number;
   vy: number;
   bornAt: number;
 }
 
+function textStyle(size: number, color: string): Phaser.Types.GameObjects.Text.TextStyle {
+  return {
+    fontFamily: FONT,
+    fontSize: `${size}px`,
+    fontStyle: 'bold',
+    color,
+    stroke: '#05070f',
+    strokeThickness: Math.max(3, Math.round(size / 7)),
+  };
+}
+
 /**
- * M2 scene: mage auto-fires at the nearest ghost, ghosts chase you in waves,
- * 5 HP, death screen, tap to restart. Best wave is saved on the device.
- * Placeholder shapes only; art and sound come later.
+ * M2.1: the same mage-vs-ghost waves as M2, with generated art (see art.ts),
+ * shadows, particles, a heart HUD, animated banners and a nicer death panel.
  */
 export class GameScene extends Phaser.Scene {
-  private player!: Phaser.GameObjects.Rectangle;
+  private player!: Phaser.GameObjects.Image;
+  private playerShadow!: Phaser.GameObjects.Image;
+  private aura!: Phaser.GameObjects.Image;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
 
@@ -47,6 +69,8 @@ export class GameScene extends Phaser.Scene {
 
   private ghosts: Ghost[] = [];
   private bolts: Bolt[] = [];
+  private trail!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private burst!: Phaser.GameObjects.Particles.ParticleEmitter;
 
   private hp = PLAYER_MAX_HP;
   private wave = 0;
@@ -57,69 +81,127 @@ export class GameScene extends Phaser.Scene {
   private dead = false;
   private deadAt = 0;
 
-  private hudText!: Phaser.GameObjects.Text;
+  private hearts: Phaser.GameObjects.Image[] = [];
+  private waveText!: Phaser.GameObjects.Text;
+  private killText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
-  private overlay?: Phaser.GameObjects.Container;
 
   constructor() {
     super('GameScene');
   }
 
   create(): void {
+    createTextures(this);
+
     // Scene objects are rebuilt on restart, so reset all run state here.
     this.ghosts = [];
     this.bolts = [];
+    this.hearts = [];
     this.hp = PLAYER_MAX_HP;
     this.wave = 0;
     this.kills = 0;
     this.lastShotAt = 0;
     this.invulnUntil = 0;
+    this.waveBreakUntil = 0;
     this.dead = false;
-    this.overlay = undefined;
     this.joyPointerId = null;
     this.joyVec.set(0, 0);
 
-    const { width, height } = this.scale;
+    // World.
+    this.add.image(W / 2, H / 2, 'bg').setDepth(0);
 
-    this.add.rectangle(width / 2, height / 2, width - 8, height - 8).setStrokeStyle(2, 0x44446a);
+    this.playerShadow = this.add.image(W / 2, H / 2 + 38, 'shadow').setDepth(1);
+    this.aura = this.add
+      .image(W / 2, H / 2, 'spark')
+      .setScale(7)
+      .setAlpha(0.12)
+      .setTint(0x7aa8ff)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(2);
+    this.player = this.add.image(W / 2, H / 2, 'mage').setDepth(6);
 
-    this.player = this.add
-      .rectangle(width / 2, height / 2, PLAYER_SIZE, PLAYER_SIZE, 0x8ab4ff)
-      .setDepth(5);
-
-    this.hudText = this.add
-      .text(12, 10, '', { fontFamily: 'sans-serif', fontSize: '16px', color: '#e0e0ff' })
-      .setDepth(20);
-    this.bannerText = this.add
-      .text(width / 2, height / 2 - 120, '', {
-        fontFamily: 'sans-serif',
-        fontSize: '28px',
-        color: '#ffffff',
+    this.trail = this.add
+      .particles(0, 0, 'spark', {
+        lifespan: 260,
+        scale: { start: 0.6, end: 0 },
+        alpha: { start: 0.7, end: 0 },
+        tint: 0xffd966,
+        blendMode: 'ADD',
+        emitting: false,
       })
-      .setOrigin(0.5)
-      .setDepth(20)
-      .setAlpha(0);
+      .setDepth(7);
+    this.burst = this.add
+      .particles(0, 0, 'spark', {
+        lifespan: { min: 300, max: 560 },
+        speed: { min: 90, max: 280 },
+        scale: { start: 0.9, end: 0 },
+        alpha: { start: 1, end: 0 },
+        tint: [0xcfe0ff, 0x9ab8ff, 0xffffff],
+        blendMode: 'ADD',
+        emitting: false,
+      })
+      .setDepth(8);
 
+    // Drifting fog and a dark edge vignette sit above the action.
+    for (let i = 0; i < 4; i++) {
+      const fog = this.add
+        .image(Phaser.Math.Between(0, W), 200 + i * 280, 'fog')
+        .setScale(Phaser.Math.FloatBetween(2, 3))
+        .setAlpha(0.55)
+        .setDepth(16);
+      this.tweens.add({
+        targets: fog,
+        x: fog.x + Phaser.Math.Between(-180, 180),
+        duration: Phaser.Math.Between(9000, 14000),
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+    this.add.image(W / 2, H / 2, 'vignette').setDepth(18);
+
+    this.createHud();
+
+    // Joystick (very faint on purpose).
     this.joyBase = this.add
-      .circle(0, 0, JOY_RADIUS, 0xffffff, 0.12)
-      .setStrokeStyle(2, 0xffffff, 0.3)
+      .circle(0, 0, JOY_RADIUS, 0xffffff, JOY_BASE_ALPHA)
+      .setStrokeStyle(3, 0xffffff, JOY_LINE_ALPHA)
       .setVisible(false)
-      .setDepth(10);
-    this.joyKnob = this.add.circle(0, 0, 22, 0xffffff, 0.35).setVisible(false).setDepth(11);
+      .setDepth(30);
+    this.joyKnob = this.add.circle(0, 0, 34, 0xffffff, JOY_KNOB_ALPHA).setVisible(false).setDepth(31);
 
     const keyboard = this.input.keyboard!;
     this.cursors = keyboard.createCursorKeys();
     this.wasd = keyboard.addKeys('W,A,S,D') as Record<string, Phaser.Input.Keyboard.Key>;
 
-    // Remove old listeners so restarting does not stack them.
     this.input.removeAllListeners();
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onPointerMove(p));
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
     this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
 
+    this.cameras.main.fadeIn(350);
     this.startNextWave();
-    this.updateHud();
+    this.updateHud(false);
+  }
+
+  private createHud(): void {
+    for (let i = 0; i < PLAYER_MAX_HP; i++) {
+      this.hearts.push(this.add.image(46 + i * 54, 52, 'heart_full').setDepth(25));
+    }
+    this.waveText = this.add
+      .text(W - 32, 26, '', textStyle(36, '#e6ecff'))
+      .setOrigin(1, 0)
+      .setDepth(25);
+    this.killText = this.add
+      .text(W - 32, 74, '', textStyle(26, '#9fb0e8'))
+      .setOrigin(1, 0)
+      .setDepth(25);
+    this.bannerText = this.add
+      .text(W / 2, H * 0.27, '', textStyle(64, '#ffffff'))
+      .setOrigin(0.5)
+      .setDepth(25)
+      .setAlpha(0);
   }
 
   // ---------- Input ----------
@@ -133,8 +215,9 @@ export class GameScene extends Phaser.Scene {
     if (this.joyPointerId !== null) return;
     this.joyPointerId = p.id;
     this.joyOrigin.set(p.x, p.y);
-    this.joyBase.setPosition(p.x, p.y).setVisible(true);
-    this.joyKnob.setPosition(p.x, p.y).setVisible(true);
+    this.joyBase.setPosition(p.x, p.y).setVisible(true).setAlpha(0);
+    this.joyKnob.setPosition(p.x, p.y).setVisible(true).setAlpha(0);
+    this.tweens.add({ targets: [this.joyBase, this.joyKnob], alpha: 1, duration: 120 });
   }
 
   private onPointerMove(p: Phaser.Input.Pointer): void {
@@ -162,7 +245,6 @@ export class GameScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     if (this.dead) {
-      // Keyboard restart for desktop testing.
       if (time - this.deadAt > 700 && Phaser.Input.Keyboard.JustDown(this.cursors.space)) {
         this.scene.restart();
       }
@@ -170,20 +252,20 @@ export class GameScene extends Phaser.Scene {
     }
     const dt = delta / 1000;
 
-    this.movePlayer(dt);
+    this.movePlayer(time, dt);
     this.autoFire(time);
     this.moveBolts(time, dt);
-    this.moveGhosts(dt);
+    this.moveGhosts(time, dt);
     this.checkBoltHits();
     this.checkGhostContact(time);
 
     // Blink while invulnerable.
-    this.player.setAlpha(time < this.invulnUntil ? (Math.floor(time / 80) % 2 ? 0.35 : 1) : 1);
+    this.player.setAlpha(time < this.invulnUntil ? (Math.floor(time / 80) % 2 ? 0.4 : 1) : 1);
 
     // Wave cleared -> short break -> next wave.
     if (this.ghosts.length === 0 && this.waveBreakUntil === 0) {
       this.waveBreakUntil = time + WAVE_BREAK_MS;
-      this.showBanner(`Wave ${this.wave} cleared!`);
+      this.showBanner(`Wave ${this.wave} cleared!`, '#9dffb0');
     }
     if (this.waveBreakUntil !== 0 && time >= this.waveBreakUntil) {
       this.waveBreakUntil = 0;
@@ -191,8 +273,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private movePlayer(dt: number): void {
-    const { width, height } = this.scale;
+  private movePlayer(time: number, dt: number): void {
     let vx = this.joyVec.x;
     let vy = this.joyVec.y;
     if (this.cursors.left.isDown || this.wasd.A.isDown) vx -= 1;
@@ -204,9 +285,19 @@ export class GameScene extends Phaser.Scene {
       vx /= len;
       vy /= len;
     }
-    const half = PLAYER_SIZE / 2 + 4;
-    this.player.x = Phaser.Math.Clamp(this.player.x + vx * PLAYER_SPEED * dt, half, width - half);
-    this.player.y = Phaser.Math.Clamp(this.player.y + vy * PLAYER_SPEED * dt, half, height - half);
+
+    this.player.x = Phaser.Math.Clamp(this.player.x + vx * PLAYER_SPEED * dt, PLAYER_MARGIN, W - PLAYER_MARGIN);
+    this.player.y = Phaser.Math.Clamp(this.player.y + vy * PLAYER_SPEED * dt, PLAYER_MARGIN, H - PLAYER_MARGIN);
+
+    if (Math.abs(vx) > 0.15) this.player.setFlipX(vx < 0);
+
+    // Float bob, plus a lean into the direction of travel.
+    const bob = Math.sin(time / 170) * (len > 0.1 ? 0.045 : 0.025);
+    this.player.setScale(1 - bob * 0.5, 1 + bob);
+    this.player.rotation = Phaser.Math.Linear(this.player.rotation, vx * 0.16, 0.2);
+
+    this.playerShadow.setPosition(this.player.x, this.player.y + 40);
+    this.aura.setPosition(this.player.x, this.player.y).setAlpha(0.11 + Math.sin(time / 300) * 0.025);
   }
 
   // ---------- Combat ----------
@@ -216,12 +307,18 @@ export class GameScene extends Phaser.Scene {
     const target = this.nearestGhost(BOLT_RANGE);
     if (!target) return;
     this.lastShotAt = time;
+
+    this.player.setFlipX(target.x < this.player.x);
     const angle = Math.atan2(target.y - this.player.y, target.x - this.player.x);
-    const bolt = this.add.circle(this.player.x, this.player.y, 5, 0xffe066).setDepth(4) as Bolt;
+    const bolt = this.add
+      .image(this.player.x, this.player.y - 6, 'bolt')
+      .setDepth(7)
+      .setBlendMode(Phaser.BlendModes.ADD) as Bolt;
     bolt.vx = Math.cos(angle) * BOLT_SPEED;
     bolt.vy = Math.sin(angle) * BOLT_SPEED;
     bolt.bornAt = time;
     this.bolts.push(bolt);
+    this.burst.explode(4, this.player.x, this.player.y - 6); // little cast flash
   }
 
   private nearestGhost(maxDist: number): Ghost | null {
@@ -238,39 +335,44 @@ export class GameScene extends Phaser.Scene {
   }
 
   private moveBolts(time: number, dt: number): void {
-    const { width, height } = this.scale;
     this.bolts = this.bolts.filter((b) => {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
-      const gone = time - b.bornAt > BOLT_LIFE_MS || b.x < 0 || b.x > width || b.y < 0 || b.y > height;
+      b.rotation += dt * 10;
+      this.trail.emitParticleAt(b.x, b.y, 1);
+      const gone = time - b.bornAt > BOLT_LIFE_MS || b.x < -20 || b.x > W + 20 || b.y < -20 || b.y > H + 20;
       if (gone) b.destroy();
       return !gone;
     });
   }
 
-  private moveGhosts(dt: number): void {
+  private moveGhosts(time: number, dt: number): void {
     for (const g of this.ghosts) {
       const angle = Math.atan2(this.player.y - g.y, this.player.x - g.x);
       g.x += Math.cos(angle) * GHOST_SPEED * dt;
       g.y += Math.sin(angle) * GHOST_SPEED * dt;
+
+      // Floaty wobble.
+      const wob = Math.sin(time / 260 + g.phase);
+      g.setScale(1 + wob * 0.05, 1 - wob * 0.05);
+      g.rotation = Math.cos(angle) * 0.14 + wob * 0.04;
+      g.shadow.setPosition(g.x, g.y + 44).setScale(1 - wob * 0.06);
     }
   }
 
   private checkBoltHits(): void {
     for (const b of [...this.bolts]) {
       for (const g of this.ghosts) {
-        if (Math.abs(b.x - g.x) < GHOST_SIZE / 2 + 5 && Math.abs(b.y - g.y) < GHOST_SIZE / 2 + 5) {
+        if (Phaser.Math.Distance.Between(b.x, b.y, g.x, g.y) < GHOST_HIT_RADIUS + 8) {
           g.hp -= BOLT_DAMAGE;
+          this.burst.explode(6, b.x, b.y);
           b.destroy();
           this.bolts.splice(this.bolts.indexOf(b), 1);
           if (g.hp <= 0) {
-            g.destroy();
-            this.ghosts.splice(this.ghosts.indexOf(g), 1);
-            this.kills += 1;
-            this.updateHud();
+            this.killGhost(g);
           } else {
-            g.setFillStyle(0xffffff); // flash white on hit
-            this.time.delayedCall(80, () => g.active && g.setFillStyle(0xc9c9e8));
+            g.setTintFill(0xffffff); // flash white on hit
+            this.time.delayedCall(90, () => g.active && g.clearTint());
           }
           break;
         }
@@ -278,15 +380,32 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private killGhost(g: Ghost): void {
+    this.ghosts.splice(this.ghosts.indexOf(g), 1);
+    this.kills += 1;
+    this.burst.explode(16, g.x, g.y);
+    g.shadow.destroy();
+    this.tweens.add({
+      targets: g,
+      scale: 1.5,
+      alpha: 0,
+      duration: 180,
+      onComplete: () => g.destroy(),
+    });
+    this.updateHud(false);
+  }
+
   private checkGhostContact(time: number): void {
     if (time < this.invulnUntil) return;
-    const reach = PLAYER_SIZE / 2 + GHOST_SIZE / 2 - 4;
     for (const g of this.ghosts) {
-      if (Math.abs(g.x - this.player.x) < reach && Math.abs(g.y - this.player.y) < reach) {
+      if (Phaser.Math.Distance.Between(g.x, g.y, this.player.x, this.player.y) < CONTACT_RADIUS) {
         this.hp -= 1;
         this.invulnUntil = time + HIT_INVULN_MS;
-        this.cameras.main.shake(120, 0.006);
-        this.updateHud();
+        this.cameras.main.shake(140, 0.01);
+        this.player.setTintFill(0xff5555);
+        this.time.delayedCall(110, () => this.player.clearTint());
+        this.burst.explode(10, this.player.x, this.player.y);
+        this.updateHud(true);
         if (this.hp <= 0) this.die(time);
         return;
       }
@@ -298,32 +417,42 @@ export class GameScene extends Phaser.Scene {
   private startNextWave(): void {
     this.wave += 1;
     const count = 3 + this.wave * 2; // wave 1 = 5 ghosts, wave 2 = 7, ...
-    const { width, height } = this.scale;
     for (let i = 0; i < count; i++) {
-      // Spawn on a random edge.
+      // Ghosts drift in from just outside a random edge.
       const edge = Phaser.Math.Between(0, 3);
-      const x = edge === 0 ? 10 : edge === 1 ? width - 10 : Phaser.Math.Between(10, width - 10);
-      const y = edge === 2 ? 10 : edge === 3 ? height - 10 : Phaser.Math.Between(10, height - 10);
-      const ghost = this.add
-        .rectangle(x, y, GHOST_SIZE, GHOST_SIZE, 0xc9c9e8)
-        .setDepth(3) as unknown as Ghost;
+      const x = edge === 0 ? -50 : edge === 1 ? W + 50 : Phaser.Math.Between(0, W);
+      const y = edge === 2 ? -50 : edge === 3 ? H + 50 : Phaser.Math.Between(0, H);
+      const ghost = this.add.image(x, y, 'ghost').setDepth(4 + Math.random() * 0.5) as Ghost;
       ghost.hp = GHOST_HP;
+      ghost.phase = Math.random() * Math.PI * 2;
+      ghost.shadow = this.add.image(x, y + 44, 'shadow').setDepth(1);
       this.ghosts.push(ghost);
     }
-    this.showBanner(`Wave ${this.wave}`);
-    this.updateHud();
+    this.showBanner(`Wave ${this.wave}`, '#ffffff');
+    this.updateHud(false);
   }
 
   // ---------- UI ----------
 
-  private updateHud(): void {
-    const hearts = '♥'.repeat(Math.max(this.hp, 0)) + '♡'.repeat(Math.max(PLAYER_MAX_HP - this.hp, 0));
-    this.hudText.setText(`${hearts}\nWave ${this.wave}   Kills ${this.kills}`);
+  private updateHud(popLostHeart: boolean): void {
+    this.hearts.forEach((h, i) => {
+      const full = i < this.hp;
+      const wasFull = h.texture.key === 'heart_full';
+      h.setTexture(full ? 'heart_full' : 'heart_empty');
+      if (popLostHeart && wasFull && !full) {
+        h.setScale(1.5);
+        this.tweens.add({ targets: h, scale: 1, duration: 260, ease: 'Back.easeOut' });
+      }
+    });
+    this.waveText.setText(`WAVE ${this.wave}`);
+    this.killText.setText(`Kills ${this.kills}`);
   }
 
-  private showBanner(text: string): void {
-    this.bannerText.setText(text).setAlpha(1);
-    this.tweens.add({ targets: this.bannerText, alpha: 0, delay: 700, duration: 600 });
+  private showBanner(text: string, color: string): void {
+    this.tweens.killTweensOf(this.bannerText);
+    this.bannerText.setText(text).setColor(color).setAlpha(1).setScale(0.6);
+    this.tweens.add({ targets: this.bannerText, scale: 1, duration: 260, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: this.bannerText, alpha: 0, delay: 900, duration: 500 });
   }
 
   private die(time: number): void {
@@ -344,31 +473,31 @@ export class GameScene extends Phaser.Scene {
       // Storage can be blocked (private mode). The game still works without it.
       best = Math.max(best, this.wave);
     }
+    const newBest = this.wave >= best && this.wave > 1;
 
-    const { width, height } = this.scale;
-    const shade = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.65);
-    const title = this.add
-      .text(width / 2, height / 2 - 70, 'You died', {
-        fontFamily: 'sans-serif',
-        fontSize: '36px',
-        color: '#ff7a7a',
-      })
-      .setOrigin(0.5);
+    const shade = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.7);
+    const panel = this.add.graphics();
+    panel.fillStyle(0x0d1226, 0.95).fillRoundedRect(W / 2 - 270, H / 2 - 260, 540, 520, 30);
+    panel.lineStyle(4, 0x4a5aa8, 1).strokeRoundedRect(W / 2 - 270, H / 2 - 260, 540, 520, 30);
+
+    const title = this.add.text(W / 2, H / 2 - 180, 'YOU DIED', textStyle(72, '#ff6b6b')).setOrigin(0.5);
     const stats = this.add
-      .text(width / 2, height / 2, `Wave reached: ${this.wave}\nKills: ${this.kills}\nBest wave: ${best}`, {
-        fontFamily: 'sans-serif',
-        fontSize: '20px',
-        color: '#ffffff',
-        align: 'center',
-      })
+      .text(
+        W / 2,
+        H / 2 - 30,
+        `Wave reached   ${this.wave}\nGhosts banished   ${this.kills}\nBest wave   ${best}`,
+        { ...textStyle(34, '#ffffff'), align: 'center', lineSpacing: 14 },
+      )
       .setOrigin(0.5);
-    const again = this.add
-      .text(width / 2, height / 2 + 90, 'Tap to play again', {
-        fontFamily: 'sans-serif',
-        fontSize: '20px',
-        color: '#8ab4ff',
-      })
-      .setOrigin(0.5);
-    this.overlay = this.add.container(0, 0, [shade, title, stats, again]).setDepth(50);
+    const items: Phaser.GameObjects.GameObject[] = [shade, panel, title, stats];
+    if (newBest) {
+      items.push(this.add.text(W / 2, H / 2 + 100, 'NEW BEST!', textStyle(36, '#ffd66b')).setOrigin(0.5));
+    }
+    const again = this.add.text(W / 2, H / 2 + 190, 'Tap to play again', textStyle(36, '#8ab4ff')).setOrigin(0.5);
+    items.push(again);
+
+    const overlay = this.add.container(0, 0, items).setDepth(50).setAlpha(0);
+    this.tweens.add({ targets: overlay, alpha: 1, duration: 350 });
+    this.tweens.add({ targets: again, alpha: 0.35, duration: 700, yoyo: true, repeat: -1 });
   }
 }

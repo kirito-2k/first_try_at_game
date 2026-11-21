@@ -26,8 +26,8 @@ Later: Capacitor (Android), AdMob. Repo: `kirito-2k/first_try_at_game`, branch `
 - Last updated: 2026-11-21
 - Game idea: Haunted Wood (lone mage, ghost waves, pick 1 upgrade per wave). See CONCEPT.md
 - Live URL: https://kirito-2k.github.io/first_try_at_game/ (repo is public, Pages on)
-- Milestone: M2 pushed (mage auto-fire, ghosts, HP, waves, death/restart)
-- Waiting on: user playtests M2 on phone and reports feel/bugs
+- Milestone: M2.1 pushed (M2 gameplay + generated art, particles, HUD, faint joystick)
+- Waiting on: user playtests M2.1 on phone and reports feel/bugs/performance
 - Known bugs: none reported yet
 
 ## Next step
@@ -37,6 +37,7 @@ upgrades kept as a data list so new ones are one-line additions.
 ## File map
 - `index.html`, `src/main.ts`: page and game setup
 - `src/scenes/GameScene.ts`: the whole game so far (tuning constants at the top)
+- `src/art.ts`: generates every texture in code (game size 720x1280)
 - `CONCEPT.md`: game design one-pager
 - `.github/workflows/deploy.yml`: auto-publish to GitHub Pages
 - `PROJECT_NOTES.md`: full notes. `agents/AGENT_TEMPLATE.md`: base for future agents.

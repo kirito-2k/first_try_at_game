@@ -1,17 +1,19 @@
 import Phaser from 'phaser';
 import { GameScene } from './scenes/GameScene';
+import { W, H } from './art';
 
 // Portrait phone-shaped game area. FIT scales it to any screen.
 new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  backgroundColor: '#1b1b2f',
+  backgroundColor: '#0a1124',
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: 360,
-    height: 640,
+    width: W,
+    height: H,
   },
+  render: { antialias: true, powerPreference: 'high-performance' },
   input: { activePointers: 3 },
   scene: [GameScene],
 });

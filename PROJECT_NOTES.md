@@ -62,8 +62,18 @@ Estimate: 3-4 months.
 - Death screen (wave, kills, best wave saved in localStorage), tap or Space to restart.
 - All tuning numbers are constants at the top of `src/scenes/GameScene.ts`.
 
+### M2.1: Visual polish (built, awaiting playtest)
+- Requested by user: joystick more transparent, better quality for every component.
+- Game size raised to 720x1280 (sharper on phones). Tuning numbers doubled to match.
+- `src/art.ts`: all art is generated in code (canvas), no downloaded assets yet:
+  forest background with trees, mage, ghost, glowing bolt, hearts, fog, vignette, shadows.
+- Particles (bolt trail, hit/kill bursts), ghost wobble, mage bob and lean, white hit flash.
+- HUD: heart icons, wave and kills text. Animated wave banners. Death panel with NEW BEST.
+- Joystick is nearly invisible: change JOY_BASE_ALPHA / JOY_LINE_ALPHA / JOY_KNOB_ALPHA.
+- Generated art is a stand-in: swap for a licensed pack (Kenney etc.) near release.
+
 ## Next
-1. User playtests M2 on the phone: is it too easy/hard, does auto-fire feel right, is it fun?
+1. User playtests M2.1 on the phone: is it too easy/hard, does auto-fire feel right, is it fun?
 2. M3: upgrade choice after each wave (3 random cards, pick 1), upgrades as a data list.
 3. M4: more enemy types (wisp, brute). M5: spitter + boss. M6: meta-progression and saves.
 
